@@ -1,0 +1,23 @@
+import {describe,it,expect,beforeEach,afterEach} from 'vitest';
+import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
+import os from 'node:os';import path from 'node:path';
+import {Documents,type FileDialogs} from '../src/main/documents';
+let directory:string;let selected:string|null;let destination:string|null;let choice:'save'|'discard'|'cancel';let replace:boolean;
+let service:Documents;
+beforeEach(async()=>{directory=await mkdtemp(path.join(os.tmpdir(),'lina-unit-'));selected=null;destination=null;choice='cancel';replace=false;const dialogs:FileDialogs={open:async()=>selected,save:async()=>destination,unsaved:async()=>choice,conflict:async()=>replace};service=new Documents(dialogs);});
+afterEach(()=>rm(directory,{recursive:true,force:true}));
+function edit(text:string){service.update({id:service.document.id,text,revision:service.document.revision+1});}
+describe('local document flows',()=>{
+  it('saves, edits and saves as without touching the original',async()=>{edit('# Hjörtur\nÍslenska');destination=path.join(directory,'first.md');await service.action('save');expect(service.dirty).toBe(false);edit('Updated');destination=path.join(directory,'second.md');await service.action('saveAs');expect(await readFile(path.join(directory,'first.md'),'utf8')).toBe('# Hjörtur\nÍslenska');expect(await readFile(destination,'utf8')).toBe('Updated');});
+  it('preserves edits when open, close, new or save-as is canceled',async()=>{edit('Keep me');await service.action('saveAs');expect(service.dirty).toBe(true);selected=path.join(directory,'open.md');await writeFile(selected,'Other');expect(await service.action('open')).toBeNull();expect(await service.action('close')).toBeNull();expect(await service.action('new')).toBeNull();expect(service.document.text).toBe('Keep me');});
+  it('does not discard when save in the dirty guard is canceled',async()=>{edit('Draft');choice='save';expect(await service.action('new')).toBeNull();expect(service.document.text).toBe('Draft');});
+  it('opens a file after explicit discard and ignores stale document updates',async()=>{edit('Draft');const oldId=service.document.id;selected=path.join(directory,'open.md');await writeFile(selected,'Opened');choice='discard';await service.action('open');service.update({id:oldId,text:'Late edit',revision:100});expect(service.document.text).toBe('Opened');expect(service.dirty).toBe(false);});
+  it('retains edits after read or write errors',async()=>{edit('Important');selected=path.join(directory,'missing.md');await expect(service.action('open')).rejects.toThrow();destination=path.join(directory,'missing','save.md');await expect(service.action('save')).rejects.toThrow();expect(service.document.text).toBe('Important');expect(service.dirty).toBe(true);});
+  it('guards external file modifications',async()=>{selected=path.join(directory,'external.md');await writeFile(selected,'Original');await service.action('open');edit('Local edit');await writeFile(selected,'External edit');await service.action('save');expect(await readFile(selected,'utf8')).toBe('External edit');expect(service.dirty).toBe(true);replace=true;await service.action('save');expect(await readFile(selected,'utf8')).toBe('Local edit');});
+  it('restores a draft and blocks stale revisions',()=>{edit('Draft');const snapshot={...service.document};service.restore(snapshot);service.update({id:service.document.id,text:'New',revision:3});service.update({id:service.document.id,text:'Stale',revision:1});expect(service.document.text).toBe('New');expect(service.document.recovered).toBe(true);expect(service.dirty).toBe(true);});
+});
+
+it('opening the current file after choosing Save loads the newly saved edits',async()=>{selected=path.join(directory,'same.md');await writeFile(selected,'Before');await service.action('open');edit('After');choice='save';await service.action('open');expect(service.document.text).toBe('After');expect(await readFile(selected,'utf8')).toBe('After');});
+it('rejects invalid UTF-8 without dropping edits',async()=>{edit('Keep');selected=path.join(directory,'invalid.md');await writeFile(selected,Buffer.from([0xff,0xfe]));await expect(service.action('open')).rejects.toThrow('UTF-8');expect(service.document.text).toBe('Keep');});
+
+it('uses stable editor offsets while preserving CRLF files on save',async()=>{selected=path.join(directory,'windows.md');await writeFile(selected,'# Title\r\n\r\nParagraph.');await service.action('open');expect(service.document.text).toBe('# Title\n\nParagraph.');edit('# Title\n\nEdited.');await service.action('save');expect(await readFile(selected,'utf8')).toBe('# Title\r\n\r\nEdited.');});
