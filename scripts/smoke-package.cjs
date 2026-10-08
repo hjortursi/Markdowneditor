@@ -11,12 +11,16 @@ const path=require('node:path');const fs=require('node:fs/promises');const os=re
   await page.getByRole('button',{name:'Reading view',exact:true}).click();
   if(await page.getByLabel('Source pane').isVisible())throw new Error('Reading view did not switch.');
   await page.getByRole('button',{name:'Live Preview view',exact:true}).click();
-  await page.screenshot({path:'test-results/lina-packaged.png'});
+  await page.screenshot({path:'test-results/lina-packaged.png',animations:'disabled'});
   await page.getByRole('button',{name:'AI settings',exact:true}).click();
   await page.getByRole('dialog',{name:'AI settings'}).waitFor();
-  await page.screenshot({path:'test-results/lina-settings.png'});
+  if(await page.getByRole('combobox',{name:'AI provider'}).inputValue()!=='openai')throw new Error('Expected direct OpenAI setup by default.');
+  await page.screenshot({path:'test-results/lina-settings.png',animations:'disabled'});
   await page.getByRole('button',{name:'Close settings'}).click();
-  await fs.writeFile('test-results/packaged-smoke.json',JSON.stringify({...details,preview:true,viewSwitching:true,settings:true},null,2));
+  await page.getByRole('textbox',{name:'Live preview editor'}).click();await page.keyboard.press('Meta+Home');await page.keyboard.press('ArrowDown');await page.keyboard.press('ArrowDown');await page.keyboard.press('Home');await page.keyboard.press('Shift+End');
+  await page.getByRole('dialog',{name:'Edit selected text with AI'}).waitFor();await page.getByRole('textbox',{name:'Editing instruction'}).fill('Make this warmer.');
+  await page.screenshot({path:'test-results/lina-packaged-selection.png',animations:'disabled'});await page.keyboard.press('Escape');
+  await fs.writeFile('test-results/packaged-smoke.json',JSON.stringify({...details,preview:true,viewSwitching:true,providerSettings:true,selectionPrompt:true,isolatedUserData:true},null,2));
   console.log(JSON.stringify(details));
  }finally{await app.close();await fs.rm(directory,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

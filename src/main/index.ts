@@ -3,7 +3,8 @@ import {mkdir,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Documents,blank,atomicJSON,remove,MAX_DOCUMENT_BYTES} from './documents';
-import {endpointURL,suggest} from './ai';
+import {suggest} from './ai';
+import {SettingsStore} from './settings';
 import type {AISettings,SettingsInput,Command,Snapshot,Action,DocumentState,AIRequest} from '../shared/types';
 app.setName('Lína');
 if(process.env.LINA_USER_DATA)app.setPath('userData',process.env.LINA_USER_DATA);
@@ -17,15 +18,14 @@ let fileBusy=false;
 let aiController:AbortController|null=null;
 let recoveryTimer:ReturnType<typeof setTimeout>|null=null;
 let recoveryQueue=Promise.resolve();
-let config={endpoint:'http://localhost:4000/v1',model:'',rememberKey:false,encryptedKey:''};
-let sessionKey='';
+const settingsStore=new SettingsStore(preferencesFile,{available:()=>safeStorage.isEncryptionAvailable(),encrypt:key=>safeStorage.encryptString(key).toString('base64'),decrypt:value=>safeStorage.decryptString(Buffer.from(value,'base64'))});
 const documents=new Documents({
   open:async()=>{const result=await dialog.showOpenDialog(win!,{title:'Open Markdown',properties:['openFile'],filters:[{name:'Markdown & text',extensions:['md','markdown','mdown','txt']},{name:'All files',extensions:['*']}]});return result.canceled?null:result.filePaths[0];},
   save:async(current)=>{const result=await dialog.showSaveDialog(win!,{title:'Save Markdown',defaultPath:current||'Untitled.md',filters:[{name:'Markdown',extensions:['md']},{name:'Text',extensions:['txt']}]});return result.canceled?null:result.filePath||null;},
   unsaved:async(name)=>{const {response}=await dialog.showMessageBox(win!,{type:'warning',message:`Save changes to “${name}”?`,detail:'Your edits will be lost if you discard them.',buttons:['Save','Cancel','Discard Changes'],defaultId:0,cancelId:1,noLink:true});return (['save','cancel','discard'] as const)[response]||'cancel';},
   conflict:async()=>{const {response}=await dialog.showMessageBox(win!,{type:'warning',message:'This file changed on disk.',detail:'Replace the version on disk with your current edits?',buttons:['Cancel','Replace'],defaultId:0,cancelId:0});return response===1;}
 });
-function publicSettings():AISettings{return {endpoint:config.endpoint,model:config.model,hasKey:!!(sessionKey||config.encryptedKey),rememberKey:config.rememberKey};}
+function publicSettings():AISettings{return settingsStore.public();}
 function command(value:Command){win?.webContents.send('lina:command',value);}
 function title(){const d=documents.document;win?.setTitle(`${d.path?path.basename(d.path):'Untitled'}${documents.dirty?' •':''} — Lína`);win?.setDocumentEdited(documents.dirty);if(d.path)win?.setRepresentedFilename(d.path);}
 function recover(keep=true){if(recoveryTimer)clearTimeout(recoveryTimer);recoveryTimer=null;const doc={...documents.document};recoveryQueue=recoveryQueue.catch(()=>{}).then(()=>keep&&doc.text!==doc.savedText?atomicJSON(recoveryFile,doc):remove(recoveryFile));return recoveryQueue;}
@@ -49,14 +49,7 @@ function registerIPC(){
   });
   ipcMain.handle('lina:settings',async(e,input?:SettingsInput)=>{
     validSender(e);if(!input)return publicSettings();
-    if(typeof input.endpoint!=='string'||typeof input.model!=='string'||input.model.length>200||typeof input.rememberKey!=='boolean'||(input.key!==undefined&&(typeof input.key!=='string'||input.key.length>8192)))throw new Error('Invalid AI settings.');
-    const endpoint=endpointURL(input.endpoint);
-    let key=input.clearKey?'':input.key||sessionKey;
-    if(!key&&config.encryptedKey&&!input.clearKey)key=safeStorage.decryptString(Buffer.from(config.encryptedKey,'base64'));
-    let encryptedKey='';
-    if(input.rememberKey&&key){if(!safeStorage.isEncryptionAvailable())throw new Error('Secure storage is unavailable. Keep the key for this session instead.');encryptedKey=safeStorage.encryptString(key).toString('base64');}
-    const next={endpoint,model:input.model.trim(),rememberKey:input.rememberKey,encryptedKey};
-    await atomicJSON(preferencesFile,next);config=next;sessionKey=key;aiController?.abort();return publicSettings();
+    const result=await settingsStore.save(input);aiController?.abort();return result;
   });
   ipcMain.handle('lina:cancel-ai',e=>{validSender(e);aiController?.abort();});
   ipcMain.handle('lina:suggest',async(e,request:AIRequest)=>{
@@ -65,12 +58,11 @@ function registerIPC(){
     aiController?.abort();const controller=new AbortController();aiController=controller;
     const timeout=setTimeout(()=>controller.abort(),60000);
     try {
-      const key=sessionKey||(config.encryptedKey?safeStorage.decryptString(Buffer.from(config.encryptedKey,'base64')):'');
-      const result=await suggest({...documents.document},request,{...config,key},controller.signal);
+      const result=await suggest({...documents.document},request,settingsStore.transport(),controller.signal);
       if(controller.signal.aborted)throw new Error('Suggestion canceled.');
       if(documents.document.id!==result.documentId||documents.document.revision!==result.revision)throw new Error('The document changed. Please request a new suggestion.');
       return result;
-    }catch(error){if(controller.signal.aborted)throw new Error('Suggestion canceled or timed out.');if(error instanceof TypeError)throw new Error('Cannot reach the AI endpoint. Check that your LiteLLM server is running.');throw error;}finally{clearTimeout(timeout);if(aiController===controller)aiController=null;}
+    }catch(error){if(controller.signal.aborted)throw new Error('Suggestion canceled or timed out.');if(error instanceof TypeError)throw new Error('Cannot reach the AI endpoint. Check your connection and AI settings.');throw error;}finally{clearTimeout(timeout);if(aiController===controller)aiController=null;}
   });
 }
 function createWindow(){
@@ -101,9 +93,9 @@ app.on('window-all-closed',()=>app.quit());
 app.on('activate',()=>{if(!win)createWindow();});
 app.whenReady().then(async()=>{
   await mkdir(storage,{recursive:true});
-  try{const data=JSON.parse(await readFile(preferencesFile,'utf8'));config={endpoint:endpointURL(data.endpoint),model:typeof data.model==='string'?data.model:'',rememberKey:!!data.rememberKey,encryptedKey:typeof data.encryptedKey==='string'?data.encryptedKey:''};}catch{/* No existing preferences needed. */}
+  await settingsStore.load();
   try{const doc=JSON.parse(await readFile(recoveryFile,'utf8')) as DocumentState;if(typeof doc.text==='string'&&typeof doc.savedText==='string'&&Buffer.byteLength(doc.text)<=MAX_DOCUMENT_BYTES&&(doc.path===null||typeof doc.path==='string'))documents.restore({...doc,revision:0});}catch{/* Missing recovery starts a fresh document. */}
-  if(!documents.document.recovered){documents.document=blank('# A little room to think\n\nWelcome to **Lína**, Hjörtur. A quiet space for words, notes, and the next good idea.\n\n## Start with a line\n\nClick anywhere and start writing. Formatting stays visible; Markdown syntax appears on the line you’re editing.\n\n- Open a Markdown file with **⌘ O**\n- Save your words with **⌘ S**\n- Switch your view with **⌘ 1**, **⌘ 2**, **⌘ 3**, or **⌘ 4**\n\n> Make a little space. See what shows up.\n\n## A second pair of eyes\n\nSelect a passage, choose a writing action, and review the suggestion before it touches your document. Set up your LiteLLM endpoint in **AI settings** when you’re ready.\n');documents.document.savedText=documents.document.text;}
+  if(!documents.document.recovered){documents.document=blank('# A little room to think\n\nWelcome to **Lína**, Hjörtur. A quiet space for words, notes, and the next good idea.\n\n## Start with a line\n\nClick anywhere and start writing. Formatting stays visible; Markdown syntax appears on the line you’re editing.\n\n- Open a Markdown file with **⌘ O**\n- Save your words with **⌘ S**\n- Switch your view with **⌘ 1**, **⌘ 2**, **⌘ 3**, or **⌘ 4**\n\n> Make a little space. See what shows up.\n\n## A second pair of eyes\n\nSelect a passage, choose a writing action, and review the suggestion before it touches your document. Select a provider and model in **AI settings**, or select some text and give your assistant an instruction.\n');documents.document.savedText=documents.document.text;}
   session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{callback({cancel:!['file:','devtools:'].includes(new URL(details.url).protocol)});});
   registerIPC();menus();createWindow();
 });
