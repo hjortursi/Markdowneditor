@@ -1,4 +1,4 @@
-export type ViewMode = 'source' | 'split' | 'preview';
+export type ViewMode = 'source' | 'split' | 'preview' | 'reading';
 export type Action = 'new' | 'open' | 'save' | 'saveAs' | 'close';
 export type Command = Action | ViewMode | 'settings' | 'rewrite' | 'shorten' | 'translate';
 export interface DocumentState {id:string; path:string|null; text:string; savedText:string; revision:number; recovered?:boolean; lineEnding?:string}

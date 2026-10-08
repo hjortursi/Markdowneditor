@@ -6,7 +6,7 @@ import {Documents,blank,atomicJSON,remove,MAX_DOCUMENT_BYTES} from './documents'
 import {endpointURL,suggest} from './ai';
 import type {AISettings,SettingsInput,Command,Snapshot,Action,DocumentState,AIRequest} from '../shared/types';
 app.setName('Lína');
-if(!app.isPackaged && process.env.LINA_USER_DATA)app.setPath('userData',process.env.LINA_USER_DATA);
+if(process.env.LINA_USER_DATA)app.setPath('userData',process.env.LINA_USER_DATA);
 const storage=app.getPath('userData');
 const preferencesFile=path.join(storage,'preferences.json');
 const recoveryFile=path.join(storage,'recovery.json');
@@ -91,7 +91,7 @@ function menus(){
     {label:'Lína',submenu:[{role:'about'},item('AI Settings…','settings','CmdOrCtrl+,'),{type:'separator'},{role:'hide'},{role:'hideOthers'},{role:'unhide'},{type:'separator'},{role:'quit'}]},
     {label:'File',submenu:[item('New','new','CmdOrCtrl+N'),item('Open…','open','CmdOrCtrl+O'),{type:'separator'},item('Save','save','CmdOrCtrl+S'),item('Save As…','saveAs','CmdOrCtrl+Shift+S'),{type:'separator'},item('Close','close','CmdOrCtrl+W')]},
     {label:'Edit',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},
-    {label:'View',submenu:[item('Source','source','CmdOrCtrl+1'),item('Split','split','CmdOrCtrl+2'),item('Preview','preview','CmdOrCtrl+3'),{type:'separator'},{role:'togglefullscreen'}]},
+    {label:'View',submenu:[item('Source','source','CmdOrCtrl+1'),item('Split','split','CmdOrCtrl+2'),item('Live Preview','preview','CmdOrCtrl+3'),item('Reading','reading','CmdOrCtrl+4'),{type:'separator'},{role:'togglefullscreen'}]},
     {label:'Writing',submenu:[item('Rewrite…','rewrite'),item('Shorten…','shorten'),item('Translate…','translate')]},
     {role:'windowMenu'}
   ]));
@@ -103,7 +103,7 @@ app.whenReady().then(async()=>{
   await mkdir(storage,{recursive:true});
   try{const data=JSON.parse(await readFile(preferencesFile,'utf8'));config={endpoint:endpointURL(data.endpoint),model:typeof data.model==='string'?data.model:'',rememberKey:!!data.rememberKey,encryptedKey:typeof data.encryptedKey==='string'?data.encryptedKey:''};}catch{/* No existing preferences needed. */}
   try{const doc=JSON.parse(await readFile(recoveryFile,'utf8')) as DocumentState;if(typeof doc.text==='string'&&typeof doc.savedText==='string'&&Buffer.byteLength(doc.text)<=MAX_DOCUMENT_BYTES&&(doc.path===null||typeof doc.path==='string'))documents.restore({...doc,revision:0});}catch{/* Missing recovery starts a fresh document. */}
-  if(!documents.document.recovered){documents.document=blank('# A little room to think\n\nWelcome to **Lína**, Hjörtur. A quiet space for words, notes, and the next good idea.\n\n## Start with a line\n\nWrite on the left. Read on the right. Your preview follows as you type.\n\n- Open a Markdown file with **⌘ O**\n- Save your words with **⌘ S**\n- Switch your view with **⌘ 1**, **⌘ 2**, or **⌘ 3**\n\n> Make a little space. See what shows up.\n\n## A second pair of eyes\n\nSelect a passage, choose a writing action, and review the suggestion before it touches your document. Set up your LiteLLM endpoint in **AI settings** when you’re ready.\n');documents.document.savedText=documents.document.text;}
+  if(!documents.document.recovered){documents.document=blank('# A little room to think\n\nWelcome to **Lína**, Hjörtur. A quiet space for words, notes, and the next good idea.\n\n## Start with a line\n\nClick anywhere and start writing. Formatting stays visible; Markdown syntax appears on the line you’re editing.\n\n- Open a Markdown file with **⌘ O**\n- Save your words with **⌘ S**\n- Switch your view with **⌘ 1**, **⌘ 2**, **⌘ 3**, or **⌘ 4**\n\n> Make a little space. See what shows up.\n\n## A second pair of eyes\n\nSelect a passage, choose a writing action, and review the suggestion before it touches your document. Set up your LiteLLM endpoint in **AI settings** when you’re ready.\n');documents.document.savedText=documents.document.text;}
   session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{callback({cancel:!['file:','devtools:'].includes(new URL(details.url).protocol)});});
   registerIPC();menus();createWindow();
 });

@@ -1,0 +1,13 @@
+// @vitest-environment jsdom
+import {it,expect} from 'vitest';
+import {EditorState,EditorSelection} from '@codemirror/state';
+import {markdown,markdownLanguage} from '@codemirror/lang-markdown';
+import {previewDecorations} from '../src/renderer/live-preview';
+function state(text:string,position=0){return EditorState.create({doc:text,selection:EditorSelection.cursor(position),extensions:[markdown({base:markdownLanguage})]});}
+function replaced(value:EditorState,focused:boolean){const result:string[]=[];previewDecorations(value,focused).hidden.between(0,value.doc.length,(from,to)=>{result.push(value.sliceDoc(from,to));});return result;}
+it('hides syntax without changing the original Markdown document',()=>{const text='# Title\n\n**bold** _italic_ `code` [label](https://example.com)';const value=state(text);expect(replaced(value,false)).toEqual(['# ','**','**','_','_','`','`','[',']','(','https://example.com',')']);expect(value.doc.toString()).toBe(text);});
+it('reveals syntax on the active line while formatting other lines',()=>{const value=state('# Title\n\n**bold**',1);expect(replaced(value,true)).toEqual(['**','**']);const next=value.update({selection:EditorSelection.cursor(value.doc.length)}).state;expect(replaced(next,true)).toEqual(['# ']);});
+it('keeps autolink text visible and images as inert placeholders',()=>{const value=state('<https://example.com>\n\n![<img onerror=bad>](https://example.com/pixel)');const result=previewDecorations(value,false);expect(replaced(value,false)).not.toContain('https://example.com');let image:HTMLElement|undefined;result.hidden.between(0,value.doc.length,(_from,_to,decoration)=>{const widget=decoration.spec.widget;if(widget&&widget.text)image=widget.toDOM();});expect(image?.textContent).toContain('<img onerror=bad>');expect(image?.querySelector('img')).toBeNull();expect(image?.querySelector('[src]')).toBeNull();});
+it('does not hide syntax across a selected range',()=>{const value=state('# Title\n\n**bold**');const selected=value.update({selection:EditorSelection.range(0,value.doc.length)}).state;expect(replaced(selected,true)).toEqual([]);});
+
+it('parses GFM tasks and strikethrough in Live Preview',()=>{const value=state('- [ ] Task\n\n~~removed~~');const result=previewDecorations(value,false);expect(replaced(value,false)).toEqual(['-','[ ]','~~','~~']);let checkbox:HTMLElement|undefined;result.hidden.between(0,value.doc.length,(_from,_to,decoration)=>{const widget=decoration.spec.widget;if(widget&&'checked' in widget)checkbox=widget.toDOM({state:value});});expect(checkbox?.tagName).toBe('INPUT');expect(checkbox?.getAttribute('aria-label')).toBe('Toggle task');});

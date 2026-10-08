@@ -4,7 +4,7 @@
 
 ![Lína Markdown editor](docs/lina.png)
 
-A small, local-first Markdown editor for Hjörtur, built with Electron, TypeScript, React, Vite and CodeMirror. Source, split and live preview views; native open/save/save-as dialogs; macOS shortcuts; unsaved-change protection; local recovery drafts; and optional LiteLLM writing suggestions.
+A small, local-first Markdown editor for Hjörtur, built with Electron, TypeScript, React, Vite and CodeMirror. Editable Live Preview, source, split and reading views; native open/save/save-as dialogs; macOS shortcuts; unsaved-change protection; local recovery drafts; and optional LiteLLM writing suggestions.
 
 ## Run
 
@@ -19,6 +19,12 @@ npm start
 
 `npm start` builds the TypeScript and renderer before launching Electron. This project is independent of other repositories.
 
+## Write in Live Preview
+
+Live Preview is the default view. Click a line and type directly in the formatted document, as in Obsidian. Markdown syntax appears on the line you are editing; headings, emphasis, lists, quotes and code remain styled elsewhere. Click a task checkbox to update its `[ ]` / `[x]` marker. The underlying Markdown is preserved, and switching views keeps the selection and undo history.
+
+Use Source for plain Markdown, Split for source beside the rendered result, or Reading for a read-only view. Tables stay as editable Markdown in Live Preview. Images remain inert placeholders in every view.
+
 ## Keyboard shortcuts
 
 | Action | Shortcut |
@@ -29,7 +35,7 @@ npm start
 | Save as | ⇧ ⌘ S |
 | Close | ⌘ W |
 | Quit | ⌘ Q |
-| Source / split / preview | ⌘ 1 / ⌘ 2 / ⌘ 3 |
+| Source / split / Live Preview / reading | ⌘ 1 / ⌘ 2 / ⌘ 3 / ⌘ 4 |
 | AI settings | ⌘ , |
 | Undo / redo | ⌘ Z / ⇧ ⌘ Z |
 
@@ -58,7 +64,7 @@ npm run test:e2e
 npm run package
 ```
 
-Unit tests cover local file flows, cancel and failure behavior, external changes, recovery, stale document versions, preview sanitization and mocked AI boundaries. Playwright tests launch the actual Electron app with isolated temporary application data and mocked native dialog choices. They exercise live preview, file shortcuts, save-as, cancel protection, AI accept/reject/undo, stale responses and blocked preview network access. Screenshots are written to `test-results`.
+Unit tests cover local file flows, cancel and failure behavior, external changes, recovery, stale document versions, preview sanitization and mocked AI boundaries. Playwright tests launch the actual Electron app with isolated temporary application data and mocked native dialog choices. They exercise editing and task toggles in Live Preview, exact Markdown saves, undo/redo across views, file shortcuts, save-as, cancel protection, AI accept/reject/undo, stale responses and blocked preview network access. Screenshots are written to `test-results`. `node scripts/smoke-package.cjs` checks the packaged app with isolated temporary application data.
 
 `npm run package` builds a local Apple Silicon `.app` and DMG. It does not publish, deploy or notarize, and uses no user signing identity. A local ad hoc signature is applied for macOS compatibility. Real gateway authentication, encrypted key persistence through macOS Keychain, Gatekeeper behavior on other Macs, Intel builds and notarization are not tested. Runtime dependencies were checked with `npm audit --omit=dev` (zero reported vulnerabilities at build time).
 
